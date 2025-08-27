@@ -1,14 +1,12 @@
 import os
 import sys
 import pandas as pd
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(project_root)
 
-from app.models import Base, Movie, Rating
-from app.database import engine
+from app.models import Movie, Rating
+from app.database import engine, Base, SessionLocal
 
 RAW_DATA_DIR = 'raw_data'
 MOVIES_CSV_PATH = os.path.join(project_root, RAW_DATA_DIR, 'movies.csv')
@@ -43,11 +41,8 @@ def run_pipeline():
     df_ratings = df_ratings[df_ratings["rating"].between(0, 5)]
     # Drop timestamp column
     df_ratings = df_ratings.drop(columns=["timestamp"])
-
-   
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
     session = SessionLocal()
-
     try:
         # Empty tables for a clean load
         session.execute(Rating.__table__.delete())
