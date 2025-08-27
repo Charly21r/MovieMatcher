@@ -1,11 +1,18 @@
 import os
+import sys
 import pandas as pd
 from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
-MOVIE_DATA_PATH = "./backend/raw_data/movies.csv"
-RATING_DATA_PATH = "./backend/raw_data/ratings.csv"
-TAGS_DATA_PATH = "./backend/raw_data/ratings.csv"
-DB_PATH = "./backend/moviematch.db"
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+
+from app.models import Base, Movie, Rating
+from app.database import engine
+
+RAW_DATA_DIR = 'raw_data'
+MOVIES_CSV_PATH = os.path.join(project_root, RAW_DATA_DIR, 'movies.csv')
+RATING_CSV_PATH = os.path.join(project_root, RAW_DATA_DIR, 'ratings.csv')
 
 
 def run_pipeline():
@@ -13,13 +20,20 @@ def run_pipeline():
         Runs the pipeline: reads, cleans, validates, and loads the data into the DB.
     """
     print("Starting pipeline...")
-    print(f"Reading data from {MOVIE_DATA_PATH}, {RATING_DATA_PATH}, y {TAGS_DATA_PATH}")
-
-    # Read csv files
+    print("Creating Tables in the Database (if they didn't exist)")
+    # Create tables in database (if they didn't exist)
     try:
-        df_movies = pd.read_csv(MOVIE_DATA_PATH)
-        df_ratings = pd.read_csv(RATING_DATA_PATH)
-        df_tags = pd.read_csv(TAGS_DATA_PATH)
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"Error while creating the tables: {e}")
+        return
+    
+    # Read csv files
+    print(f"Reading data from {MOVIES_CSV_PATH}, {RATING_CSV_PATH}")
+    try:
+        df_movies = pd.read_csv(MOVIES_CSV_PATH)
+        df_ratings = pd.read_csv(RATING_CSV_PATH)
+        # df_tags = pd.read_csv(TAGS_DATA_PATH)
     except Exception as e:
         print(f"Error while reading the csv data: {e}")
         return
@@ -30,17 +44,37 @@ def run_pipeline():
     # Drop timestamp column
     df_ratings = df_ratings.drop(columns=["timestamp"])
 
-    # Create Sqlite database
-    print(f"Creating and connecting to the database at: {DB_PATH}")
-    engine = create_engine(f'sqlite:///{DB_PATH}')
+   
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    session = SessionLocal()
 
     try:
-        df_movies.to_sql("movies", engine, if_exists='replace', index=False)
-        df_ratings.to_sql("ratings", engine, if_exists='replace', index=False)
+        # Empty tables for a clean load
+        session.execute(Rating.__table__.delete())
+        session.execute(Movie.__table__.delete())
+
+        movies_to_load = df_movies.to_dict(orient='records')
+        ratings_to_load = df_ratings.to_dict(orient='records')
+
+        # Insert into database
+        print(f"Loading {len(movies_to_load)} movies to the database")
+        session.bulk_insert_mappings(Movie, movies_to_load)
+        
+        print(f"Loading {len(ratings_to_load)} ratings to the database")
+        session.bulk_insert_mappings(Rating, ratings_to_load)
+
+        session.commit()
+    
     except Exception as e:
         print(f"Error while loading the data to the database: {e}")
+        session.rollback()
         return
-    
+    finally:
+        session.close()
+   
+
     print(f"Pipeline finished succesfuly")
 
-run_pipeline()
+
+if __name__ == "__main__":
+    run_pipeline()
